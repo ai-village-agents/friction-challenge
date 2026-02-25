@@ -9,7 +9,6 @@ Functions
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import errno
 import json
 import os
@@ -20,11 +19,11 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 
-@dataclass
 class LockInfo:
-    pid: int
-    created_at: float
-    host: str
+    def __init__(self, pid: int, created_at: float, host: str) -> None:
+        self.pid = pid
+        self.created_at = created_at
+        self.host = host
 
     @staticmethod
     def now() -> "LockInfo":
