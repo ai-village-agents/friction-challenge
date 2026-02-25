@@ -25,16 +25,21 @@ Example usage:
     python task1_unreliable_api.py \
         --url "https://example.com/api/resource" \
         --max-attempts 8 \
-        --timeout 5
+        --timeout 5 \
+        --verbose \
+        --diagnostics-log api_attempts.jsonl
 
 On success, the validated JSON is printed to stdout.
 On failure, a non-zero exit code is returned and details are logged to stderr.
+If a diagnostics log path is provided, one JSON object per attempt is also
+written to that file (JSON Lines format).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -89,6 +94,13 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Print detailed diagnostics to stderr",
     )
+    parser.add_argument(
+        "--diagnostics-log",
+        help=(
+            "Optional path to a JSONL file where each attempt will be logged as "
+            "a structured JSON object. Existing files are appended to."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -96,6 +108,25 @@ def log(msg: str, *, verbose: bool = True) -> None:
     if verbose:
         sys.stderr.write(msg + "\n")
         sys.stderr.flush()
+
+
+def append_diagnostic(path: Optional[str], event: Dict[str, Any]) -> None:
+    """Append a single JSON-serializable event to the diagnostics log, if set."""
+
+    if not path:
+        return
+
+    # Best-effort directory creation
+    directory = os.path.dirname(os.path.abspath(path))
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+
+    # Attach a timestamp if the caller didn't provide one
+    event.setdefault("ts", time.time())
+
+    with open(path, "a", encoding="utf-8") as f:
+        json.dump(event, f, ensure_ascii=False)
+        f.write("\n")
 
 
 def compute_backoff_delay(attempt: int, cfg: RetryConfig, response: Optional[Response]) -> float:
@@ -149,15 +180,47 @@ def validate_json_payload(payload: Any) -> None:
         raise ValidationError("Missing required key: 'data'")
 
 
-def fetch_with_retries(url: str, cfg: RetryConfig, *, verbose: bool = True) -> Dict[str, Any]:
+def fetch_with_retries(
+    url: str,
+    cfg: RetryConfig,
+    *,
+    verbose: bool = True,
+    diagnostics_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Fetch JSON from an unreliable endpoint with retries and diagnostics.
+
+    On each attempt, a structured diagnostics event is optionally written to
+    ``diagnostics_path`` if provided.
+    """
+
     last_error: Optional[Exception] = None
 
     for attempt in range(1, cfg.max_attempts + 1):
+        append_diagnostic(
+            diagnostics_path,
+            {
+                "event": "attempt_start",
+                "attempt": attempt,
+                "max_attempts": cfg.max_attempts,
+                "url": url,
+            },
+        )
+
+        resp: Optional[Response] = None
         try:
             log(f"Attempt {attempt}/{cfg.max_attempts} to GET {url}", verbose=verbose)
             resp = requests.get(url, timeout=cfg.timeout)
             status = resp.status_code
             log(f"  -> HTTP {status}", verbose=verbose)
+
+            append_diagnostic(
+                diagnostics_path,
+                {
+                    "event": "http_response",
+                    "attempt": attempt,
+                    "status": status,
+                },
+            )
 
             if 200 <= status < 300:
                 # Try to parse JSON
@@ -165,35 +228,117 @@ def fetch_with_retries(url: str, cfg: RetryConfig, *, verbose: bool = True) -> D
                     data = resp.json()
                 except ValueError as e:
                     # Malformed JSON despite 2xx
+                    append_diagnostic(
+                        diagnostics_path,
+                        {
+                            "event": "json_parse_error",
+                            "attempt": attempt,
+                            "error": str(e),
+                        },
+                    )
                     raise ValidationError(f"Malformed JSON body on 2xx response: {e}") from e
 
                 # Validate structure
-                validate_json_payload(data)
+                try:
+                    validate_json_payload(data)
+                except ValidationError as e:
+                    append_diagnostic(
+                        diagnostics_path,
+                        {
+                            "event": "schema_validation_error",
+                            "attempt": attempt,
+                            "error": str(e),
+                        },
+                    )
+                    raise
+
+                append_diagnostic(
+                    diagnostics_path,
+                    {
+                        "event": "success",
+                        "attempt": attempt,
+                    },
+                )
                 return data
 
             # Non-2xx responses
             if not is_retryable_http_status(status):
-                raise FatalApiError(f"Non-retryable HTTP status {status} from {url}")
+                err = FatalApiError(f"Non-retryable HTTP status {status} from {url}")
+                append_diagnostic(
+                    diagnostics_path,
+                    {
+                        "event": "fatal_http_status",
+                        "attempt": attempt,
+                        "status": status,
+                        "error": str(err),
+                    },
+                )
+                raise err
 
             # Retryable HTTP error
             last_error = ApiError(f"Retryable HTTP status {status} from {url}")
+            append_diagnostic(
+                diagnostics_path,
+                {
+                    "event": "retryable_http_status",
+                    "attempt": attempt,
+                    "status": status,
+                    "error": str(last_error),
+                },
+            )
 
         except (requests.Timeout, requests.ConnectionError) as e:
             last_error = e
             log(f"  -> Network error: {e}", verbose=verbose)
+            append_diagnostic(
+                diagnostics_path,
+                {
+                    "event": "network_error",
+                    "attempt": attempt,
+                    "error_type": type(e).__name__,
+                    "error": str(e),
+                },
+            )
         except ValidationError as e:
             # Validation errors are treated as fatal by default
+            append_diagnostic(
+                diagnostics_path,
+                {
+                    "event": "validation_error",
+                    "attempt": attempt,
+                    "error": str(e),
+                },
+            )
             raise
 
         # If we got here, consider another attempt
         if attempt < cfg.max_attempts:
-            delay = compute_backoff_delay(attempt, cfg, locals().get("resp"))
+            delay = compute_backoff_delay(attempt, cfg, resp)
             log(f"  -> Will retry after {delay:.2f}s", verbose=verbose)
+            append_diagnostic(
+                diagnostics_path,
+                {
+                    "event": "backoff_delay",
+                    "attempt": attempt,
+                    "delay_seconds": delay,
+                },
+            )
             time.sleep(delay)
         else:
             break
 
-    raise ApiError(f"Failed to retrieve a valid response from {url} after {cfg.max_attempts} attempts: {last_error}")
+    append_diagnostic(
+        diagnostics_path,
+        {
+            "event": "giving_up",
+            "attempts": cfg.max_attempts,
+            "last_error": str(last_error) if last_error else None,
+        },
+    )
+    raise ApiError(
+        f"Failed to retrieve a valid response from {url} after "
+        f"{cfg.max_attempts} attempts: {last_error}"
+    )
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -201,7 +346,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     cfg = RetryConfig(max_attempts=args.max_attempts, timeout=args.timeout)
 
     try:
-        payload = fetch_with_retries(args.url, cfg, verbose=args.verbose)
+        payload = fetch_with_retries(
+            args.url,
+            cfg,
+            verbose=args.verbose,
+            diagnostics_path=args.diagnostics_log,
+        )
     except FatalApiError as e:
         log(f"FATAL: {e}", verbose=True)
         return 2
@@ -220,4 +370,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
