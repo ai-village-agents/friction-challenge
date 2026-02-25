@@ -67,6 +67,31 @@ Each solution has two parts: a simulated "broken" environment that demonstrates 
 
 ---
 
+## Compliance Matrix
+
+| Task | Failure Mode | Root Cause | Detection Method | Recovery Strategy | Verified |
+|------|-------------|------------|-----------------|-------------------|----------|
+| **Task 1** | HTTP 500 (server error) | Transient server instability | HTTP status code check | Exponential backoff + jitter retry | ✅ |
+| **Task 1** | HTTP 429 (rate limit) | Request throttling | HTTP status code + `Retry-After` header | Wait exactly `Retry-After` seconds | ✅ |
+| **Task 1** | HTTP 503 (unavailable) | Service overload | HTTP status code + `Retry-After` header | Wait per Retry-After header | ✅ |
+| **Task 1** | Truncated JSON | Response cut off mid-stream | `json.JSONDecodeError` on parse | Treat as transient error, retry | ✅ |
+| **Task 1** | Schema-invalid 200 OK | API bug returns partial payload | Key presence validation after parse | Log missing fields, retry | ✅ |
+| **Task 1** | Circuit breaker trip | Accumulated 7+ consecutive failures | Failure counter vs. threshold | Raise `CircuitBreakerOpen`, halt | ✅ |
+| **Task 2** | NULL bytes (`\x00`) | Binary corruption in text field | Char-by-char `ord() > 127` or `== 0` | Strip NULL bytes from field value | ✅ |
+| **Task 2** | Unicode homoglyphs | Cyrillic chars visually identical to Latin | `unicodedata.name()` + NFKC normalization | Normalize to canonical ASCII form | ✅ |
+| **Task 2** | Invisible control chars | Zero-width joiners/spaces injected | `unicodedata.category()` == 'Cf' check | Remove all format/control characters | ✅ |
+| **Task 2** | Invalid calendar date | 2026-02-30 (Feb 30 doesn't exist) | `datetime.strptime` raises `ValueError` | Flag as `INVALID_DATE`, quarantine row | ✅ |
+| **Task 2** | Out-of-range numeric value | 9999.9°C (physically impossible) | Domain-specific bounds: [-50, 60]°C | Flag as `INVALID_VALUE`, quarantine row | ✅ |
+| **Task 2** | Silent drop of bad rows | Traditional pattern hides data loss | Explicit quarantine counter + log | Quarantine list returned with diagnostics | ✅ |
+| **Task 3** | Stale PID lock (dead process) | Previous run crashed without cleanup | `os.kill(pid, 0)` — `ProcessLookupError` if dead | Remove stale lock, proceed | ✅ |
+| **Task 3** | Stale heartbeat (>30s) | Process frozen / zombie / disk stall | Compare heartbeat timestamp to `time.time()` | Treat as stale, remove lock | ✅ |
+| **Task 3** | Race on lock creation | Two processes both detect no lock | `O_CREAT \| O_EXCL` atomic open — only one wins | Losing process retries with backoff | ✅ |
+| **Task 3** | Env var vanishes mid-run | External process unsets variable | `os.environ.get()` returns `None` | Use startup-cached value, log warning | ✅ |
+| **Task 3** | Temp dir deleted mid-run | OS cleanup / cron job removes `/tmp/work` | `FileNotFoundError` on write/read | Recreate dir and temp file, resume | ✅ |
+| **Task 3** | Zombie lock (heartbeat stopped) | Owner thread suspended/stuck | Heartbeat age > `HEARTBEAT_TIMEOUT=30s` | Break lock after timeout, log incident | ✅ |
+
+---
+
 ## Design Philosophy
 
 Real-world automation scripts fail at the edges: at startup, at shutdown, and in the space between. The common thread across all three tasks is that **silent failures are the most dangerous kind**. This submission prioritizes:
@@ -76,4 +101,22 @@ Real-world automation scripts fail at the edges: at startup, at shutdown, and in
 3. **Observability** — every failure and every recovery is logged with timestamps
 4. **Idempotency** — workarounds are safe to retry and don't leave state worse than they found it
 
-Run any script with `python3 taskN_*.py` to see both the failure simulation and recovery in action. No external dependencies required.
+---
+
+## Running the Solutions
+
+```bash
+# Task 1: Demonstrates API retry with backoff + circuit breaker
+python3 task1_unreliable_api.py
+
+# Task 2: Demonstrates CSV corruption pipeline (scan→repair→validate→process)
+python3 task2_file_corruption.py
+
+# Task 3: Demonstrates ghost env + stale locks + concurrent instances
+python3 task3_ghost_machine.py
+
+# Smoke tests (runs all three demos)
+python3 test_smoke.py
+```
+
+No external dependencies required — all three solutions use Python 3 standard library only.
