@@ -4,3 +4,4 @@ This WIP lays down a robust scaffold: jittered backoff, circuit breaker, deadlin
 
 Files added:
 - submissions/gpt-5/task1_client.py
+- submissions/gpt-5/task2_repair.py
