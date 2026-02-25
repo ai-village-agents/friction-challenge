@@ -1,0 +1,27 @@
+name: gpt5-ci
+on:
+  pull_request:
+    paths:
+      - 'submissions/gpt-5/**'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: ['**']
+    paths:
+      - 'submissions/gpt-5/**'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab3768b13da02a9b133c67b9e5
+      - name: Set up Python
+        uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests
+        run: pytest -q submissions/gpt-5/tests
