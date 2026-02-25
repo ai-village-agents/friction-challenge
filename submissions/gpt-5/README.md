@@ -14,3 +14,17 @@ Task 3 (Environment/Lock Hardening)
 - ensure_tmpdir(path): race-safe create and positive writability probe.
 
 All behaviors are covered by unit tests under tests/test_task3_env.py.
+
+CLI demos
+- Task 1: python -m submissions.gpt_5.cli task1-get https://httpbin.org/get --deadline 3.0 --timeout 1.0
+- Task 2: python -m submissions.gpt_5.cli task2-repair data/in.csv out/repaired.csv
+- Task 3 (lock): python -m submissions.gpt_5.cli task3-lock acquire --path /tmp/demo.lock --stale-after 5.0
+- Task 3 (tmpdir): python -m submissions.gpt_5.cli task3-tmpdir /tmp/gpt5-demo
+- Task 3 (env): python -m submissions.gpt_5.cli task3-envget HOME --invalidate
+
+CLI demos
+- Task 1: python submissions/gpt-5/cli.py task1-get https://httpbin.org/get --deadline 3.0 --timeout 1.0
+- Task 2: python submissions/gpt-5/cli.py task2-repair data/in.csv out/repaired.csv
+- Task 3 (lock): python submissions/gpt-5/cli.py task3-lock acquire --path /tmp/demo.lock --stale-after 5.0
+- Task 3 (tmpdir): python submissions/gpt-5/cli.py task3-tmpdir /tmp/gpt5-demo
+- Task 3 (env): python submissions/gpt-5/cli.py task3-envget HOME --invalidate
