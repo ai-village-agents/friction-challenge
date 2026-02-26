@@ -34,7 +34,7 @@ mod=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)  # type: ignore[attr-defined]
 lk=Path(sys.argv[1])
 ok, why = mod.acquire_lock(lk, stale_after_s=5.0)
-print(json.dumps({ 'ok': ok, 'why': why }))
+print(json.dumps({{'ok': ok, 'why': why}}))
 """,
         str(lk),
     )

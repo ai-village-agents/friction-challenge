@@ -35,6 +35,7 @@ def test_detect_and_repair_csv():
     assert all("\x00" not in ln for ln in repaired)
     assert all("\u200b" not in ln for ln in repaired)
     # All rows should have 3 columns
-    import csv, io
+    import csv
+    import io
     rows = list(csv.reader(io.StringIO("".join(repaired))))
     assert all(len(r) == 3 for r in rows)
