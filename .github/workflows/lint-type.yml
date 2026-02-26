@@ -15,9 +15,9 @@ jobs:
   lint_type:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab3768b13da02a9b133c67b9e5
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install tools
