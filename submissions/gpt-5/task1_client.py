@@ -18,11 +18,11 @@ Usage (example):
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 import time
-import json
+import json as json_mod
 
-import requests
+import requests  # type: ignore[import-not-found,import-untyped]
 
 # Local imports via direct relative path style for runtime; pytest imports modules by file path
 from .common.backoff import backoff_delays
@@ -61,7 +61,7 @@ class RobustHttpClient:
         method: str,
         url: str,
         *,
-        json: Any | None = None,
+        json_body: Any | None = None,
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         timeout_s: float | None = None,
@@ -91,7 +91,7 @@ class RobustHttpClient:
 
             try:
                 def do_request() -> requests.Response:
-                    return self._session.request(method=method, url=url, json=json, params=params, headers=hdrs, timeout=per_timeout)
+                    return self._session.request(method=method, url=url, json=json_body, params=params, headers=hdrs, timeout=per_timeout)
 
                 resp = self._breaker.call(do_request)
             except CircuitOpenError as e:
@@ -126,7 +126,7 @@ class RobustHttpClient:
             if 'application/json' in ctype.lower():
                 try:
                     parsed = resp.json()
-                except json.JSONDecodeError as e:
+                except json_mod.JSONDecodeError as e:
                     self._log.info(f"json_decode_error attempt={idx+1}: {e}")
                     if idx < attempts - 1:
                         time.sleep(delays[idx])

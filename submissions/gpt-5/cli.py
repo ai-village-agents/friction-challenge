@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import importlib.abc
 import json
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ def _load_module(name: str, rel: str) -> ModuleType:
     if spec is None or getattr(spec, 'loader', None) is None:
         raise RuntimeError(f"cannot load {name} from {p}")
     m = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    assert isinstance(spec.loader, importlib.abc.Loader)
     spec.loader.exec_module(m)  # type: ignore[attr-defined]
     return m
 
